@@ -848,7 +848,7 @@ package states
 		{
 			twitterRequest.removeEventListener(TwitterRequestEvent.COMPLETE, onTwitterComplete);
 			twitterRequest.removeEventListener(TwitterErrorEvent.CLIENT_ERROR, onOAuthRequestTokenError);
-			twitterRequest.removeEventListener(TwitterErrorEvent.SERVER_ERROR, onOAuthRequestTokenError);
+			twitterRequest.removeEventListener(TwitterErrorEvent.SERVER_ERROR, onOAuthRequestTokenError);//
 			// Open the authorization page in browser
 			webView = new StageWebView();
 			webView.stage = Starling.current.nativeStage;
