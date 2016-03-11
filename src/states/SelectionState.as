@@ -10,6 +10,7 @@ package states
 	import flash.display.BitmapData;
 	import flash.events.Event;
 	import flash.events.HTTPStatusEvent;
+	import flash.events.IOErrorEvent;
 	import flash.events.LocationChangeEvent;
 	import flash.events.ProgressEvent;
 	import flash.filesystem.File;
@@ -25,9 +26,11 @@ package states
 	import flash.text.TextFieldType;
 	import flash.text.TextFormat;
 	import flash.utils.ByteArray;
+	import flash.utils.setTimeout;
 	
 	import isle.susisu.twitter.Twitter;
 	import isle.susisu.twitter.TwitterRequest;
+	import isle.susisu.twitter.TwitterTokenSet;
 	import isle.susisu.twitter.events.TwitterErrorEvent;
 	import isle.susisu.twitter.events.TwitterRequestEvent;
 	
@@ -101,6 +104,9 @@ package states
 		private var twitterRequest:TwitterRequest;
 		private var webView:StageWebView;
 		private var twitterUploadEnabled:Boolean;
+		private var webview:StageWebView;
+		private var pinExtractable:Boolean;
+		private var token:TwitterTokenSet;
 		public function SelectionState()
 		{
 			this.addEventListener( starling.events.Event.ADDED_TO_STAGE, initialize );
@@ -109,6 +115,7 @@ package states
 		private function initialize(event:starling.events.Event):void
 		{
 			this.removeEventListener( starling.events.Event.ADDED_TO_STAGE, initialize );
+			pinExtractable = false;
 			twitterUploadEnabled = false;
 			createArt();
 			createIcons();
@@ -830,48 +837,50 @@ package states
 		
 		private function activateTwitter():void
 		{
-			twitter = new Twitter( "0yangWj9bpkpJlzlZQDGzczNa", "sSWvNkardudWDcQINRzg7ADjvo0zfS6RFDH1WLepNDUCEBCVw1", "705077258050883585-jNsAEP213P4CqwGbElsJuaKNazFWvrg", "qYeOUiJ93nKihjhACJkeq7ujONNNMZSoduraS8ybYywfQ" );
+			twitter = new Twitter( "0yangWj9bpkpJlzlZQDGzczNa", "sSWvNkardudWDcQINRzg7ADjvo0zfS6RFDH1WLepNDUCEBCVw1");
 			twitterRequest = twitter.oauth_requestToken( );
-			twitterRequest.addEventListener(TwitterRequestEvent.COMPLETE, onTwitterComplete);
-			twitterRequest.addEventListener(TwitterErrorEvent.CLIENT_ERROR, onOAuthRequestTokenError);
-			twitterRequest.addEventListener(TwitterErrorEvent.SERVER_ERROR, onOAuthRequestTokenError);
+			twitterRequest.addEventListener(TwitterRequestEvent.COMPLETE, onTwitterRequestComplete);
+			twitterRequest.addEventListener(TwitterErrorEvent.CLIENT_ERROR, handleErrorRequest);
+			twitterRequest.addEventListener(TwitterErrorEvent.SERVER_ERROR, handleErrorRequest);
+			twitterRequest.addEventListener( IOErrorEvent.IO_ERROR, handleErrorRequest);
 			twitter.getOAuthAuthorizeURL();
 		}
 		
-		private function onOAuthRequestTokenError(event:TwitterErrorEvent):void
+		private function handleErrorRequest(event:TwitterErrorEvent):void
 		{
 			trace(event.message);
 			trace(event.statusCode);
 		}
 		
-		private function onTwitterComplete(event:TwitterRequestEvent):void
+		private function onTwitterRequestComplete(event:TwitterRequestEvent):void
 		{
-			twitterRequest.removeEventListener(TwitterRequestEvent.COMPLETE, onTwitterComplete);
-			twitterRequest.removeEventListener(TwitterErrorEvent.CLIENT_ERROR, onOAuthRequestTokenError);
-			twitterRequest.removeEventListener(TwitterErrorEvent.SERVER_ERROR, onOAuthRequestTokenError);//
+			twitterRequest.removeEventListener(TwitterRequestEvent.COMPLETE, onTwitterRequestComplete);
 			// Open the authorization page in browser
-			webView = new StageWebView();
-			webView.stage = Starling.current.nativeStage;
-			webView.viewPort = new Rectangle(0, 0, stage.stageWidth, stage.stageHeight);
-			webView.loadURL(twitter.getOAuthAuthorizeURL());
-			webView.addEventListener(LocationChangeEvent.LOCATION_CHANGE, onWebView );
+			var request:URLRequest = new URLRequest(twitter.getOAuthAuthorizeURL());
+			webview = new StageWebView();
+			webview.addEventListener(LocationChangeEvent.LOCATION_CHANGE, onWebLocationChhange);
+			webview.addEventListener(flash.events.Event.COMPLETE, onWebComplete);
+			webview.viewPort = new Rectangle(0, 0, stage.stageWidth, stage.stageHeight);
+			webview.stage = Starling.current.nativeStage;
+			webview.assignFocus();
+			webview.loadURL(request.url + "&force_login=true&screen_name=");
 		}
 		
-		private function onWebView(event:LocationChangeEvent):void
+		private function onWebLocationChhange(event:LocationChangeEvent):void
 		{
-			if(event.location.search("oauth_token") < 0)
-			{
-				webView.removeEventListener(LocationChangeEvent.LOCATION_CHANGE, onWebView );
-				webView.dispose();
-//				webView = null;
-				twitterUploadEnabled = true;
-				onWebComplete();
+			if (event.location.search("oauth_token") >= 0) {
+				trace("loc change oauth_token, returning: "+event.location);
+				return;
+			}
+			else {
+				pinExtractable = true;
+				trace("the magic should happen here: "+event.location);
 			}
 		}
 		
 		private function onWebComplete(event:flash.events.Event = null):void
 		{
-			if(twitterUploadEnabled)
+			if(pinExtractable)
 			{
 				imageWrapper.scaleX = imageWrapper.scaleY = 1;
 				
@@ -907,33 +916,59 @@ package states
 				sendEmailStatus.x = topQuad.x;
 				sendEmailStatus.y = stage.stageHeight - 100 * Assets.aspect * 2;
 				
-				eaze( imageWrapper ).to( 0.5 ).onComplete( sendContentTwitter );
+				eaze( imageWrapper ).to( 0.5 ).onComplete( sendContentTwitter, event );
 			}
 		}
 		
-		private function sendContentTwitter():void
+		private function sendContentTwitter( event:flash.events.Event ):void
 		{
+			if(pinExtractable) {
+				StageWebView(event.currentTarget).loadURL("javascript:document.title=document.documentElement.innerHTML;");
+				//				StageWebView(event.currentTarget).addEventListener(Event.COMPLETE, onJavascriptLoaded);
+				setTimeout( onJavascriptLoaded, 100, event );
+			}
+		}
+		
+		private function onJavascriptLoaded( event:flash.events.Event ):void
+		{
+			if(pinExtractable) {
+				var pin:String = String(StageWebView(event.currentTarget).title.split('<kbd aria-labelledby="code-desc"><code>')[1]).split("<")[0];
+				trace("pin: "+pin);
+				
+				if (pin && pin.toString() != "undefined") {
+					StageWebView(event.currentTarget).dispose();
+					webView = null;
+					
+					twitterRequest = twitter.oauth_accessToken(pin);
+					twitterRequest.addEventListener(TwitterRequestEvent.COMPLETE, pinRequestCompleteHandler);
+				}
+				
+			}
+		}
+		
+		private function pinRequestCompleteHandler(event:flash.events.Event):void
+		{
+			twitterRequest.removeEventListener(TwitterRequestEvent.COMPLETE, pinRequestCompleteHandler);
+			token = twitter.accessTokenSet;
+			twitter = null;
+			twitter = new Twitter('0yangWj9bpkpJlzlZQDGzczNa','sSWvNkardudWDcQINRzg7ADjvo0zfS6RFDH1WLepNDUCEBCVw1',token.oauthToken,token.oauthTokenSecret);
+			twitterRequest = twitter.account_verifyCredentials();
+			twitterRequest.addEventListener( TwitterRequestEvent.COMPLETE, onTwitterReady);
+		}
+		
+		protected function onTwitterReady(event:flash.events.Event):void
+		{
+			twitterRequest.removeEventListener( TwitterRequestEvent.COMPLETE, onTwitterReady);
+			trace('Twitter is ready to post status');
 			var data:Object = saveImageData();
 			twitterRequest = twitter.statuses_updateWithMedia( "COCA-COLA #TasteTheFeeling photobooth", data.byteArray );
-			
-			twitterRequest.addEventListener(TwitterRequestEvent.COMPLETE, onTwitterStatusSent);
-			twitterRequest.addEventListener(TwitterErrorEvent.CLIENT_ERROR, onOAuthRequestTokenError);
-			twitterRequest.addEventListener(TwitterErrorEvent.SERVER_ERROR, onOAuthRequestTokenError);
+			twitterRequest.addEventListener( TwitterRequestEvent.COMPLETE, onTwitterStatusSent);
 		}
 		
 		private function onTwitterStatusSent(event:flash.events.Event):void
 		{
-//			var urlLoader:URLLoader = new URLLoader(  );
-//			urlLoader.load( new URLRequest("https://twitter.com/logout") );
-//			urlLoader.addEventListener(HTTPStatusEvent.HTTP_RESPONSE_STATUS, onStatus );
-//			urlLoader.addEventListener(flash.events.Event.COMPLETE, onLogout );
-			
-			webView = new StageWebView();
-			webView.stage = Starling.current.nativeStage;
-			webView.viewPort = new Rectangle(0, 0, stage.stageWidth, stage.stageHeight);
-			webView.loadURL("https://twitter.com/logout");
-//			webView.addEventListener(LocationChangeEvent.LOCATION_CHANGE, onWebView );
-			webView.addEventListener(flash.events.Event.COMPLETE, onLogout );
+			StatesMaster(parent).NEXT_STATE = "result";
+			dispatchEvent( new starling.events.Event( StatesMaster.SWITCH ) );
 		}
 		
 		protected function onStatus(event:HTTPStatusEvent):void
